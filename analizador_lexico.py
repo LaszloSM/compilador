@@ -3,11 +3,11 @@ import tkinter as tk
 from tkinter import messagebox, scrolledtext
 
 # Colores inspirados en Evangelion 01
-EVANGELION_PURPLE = "#4B0082"
-EVANGELION_GREEN = "#7FFF00"
-EVANGELION_BLACK = "#1C1C1C"
-EVANGELION_GRAY = "#2F4F4F"
-EVANGELION_ORANGE = "#EF7F02"
+EVANGELION_PURPLE = "#734f9a"
+EVANGELION_GREEN = "#8bd450"
+EVANGELION_BLACK = "#000000"
+EVANGELION_GRAY = "#1d1a2f"
+EVANGELION_ORANGE = "#ec7744"
 
 # Palabras clave para Python
 python_keywords = r'\b(False|await|else|import|pass|None|break|except|in|raise|True|class|finally|is|return|' \
