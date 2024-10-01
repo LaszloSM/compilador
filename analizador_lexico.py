@@ -343,7 +343,7 @@ etiqueta_titulo = tk.Label(pantalla_inicio, text="COMPILADOR", font=titulo_fuent
 etiqueta_titulo.pack(pady=30)
 
 
-etiqueta_bienvenida = tk.Label(pantalla_inicio, text="Bienvenido al COMPILADOR\nElige tu lenguaje y código a analizar", font=bienvenida_fuente, bg=EVANGELION_BLACK, fg=EVANGELION_GRAY)
+etiqueta_bienvenida = tk.Label(pantalla_inicio, text="Bienvenido al COMPILADOR\nElige tu lenguaje y código a analizar", font=bienvenida_fuente, bg=EVANGELION_BLACK, fg=EVANGELION_GREEN)
 etiqueta_bienvenida.pack(pady=10)
 
 
