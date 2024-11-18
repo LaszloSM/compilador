@@ -1,388 +1,286 @@
 import re
+import keyword
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
-import networkx as nx
-import matplotlib.pyplot as plt
-from networkx.drawing.nx_agraph import graphviz_layout
+from graphviz import Digraph
+from PIL import Image, ImageTk
 
-# Colores inspirados en Evangelion 01
-EVANGELION_PURPLE = "#4B0082"
-EVANGELION_GREEN = "#7FFF00"
-EVANGELION_BLACK = "#1C1C1C"
-EVANGELION_GRAY = "#2F4F4F"
-EVANGELION_ORANGE = "#EF7F02"
-EVANGELION_WHITE = "#CCCCCC"
+# Patrones de análisis léxico
+TOKENS_PYTHON = [
+    ('COMENTARIO_LINEA', r'#.*'),
+    ('CADENA_MULTILINEA', r'("""[\s\S]*?"""|\'\'\'[\s\S]*?\')'),
+    ('CADENA', r'"[^"\n]*"|\'[^\']*\''),  
+    ('OPERADOR_LOGICO', r'and|or|not|&&|\|\|'),  
+    ('OPERADOR_COMPARACION', r'==|!=|<=|>=|<|>'),
+    ('OPERADOR_ASIGNACION', r'[\+\-\*/]?='),  
+    ('OPERADOR_ARITMETICO', r'[+\-*/%]'),
+    ('PUNTUACION', r'[;,\(\)\{\}\[\]\.:]'),
+    ('IDENTIFICADOR', r'[a-zA-Z_][a-zA-Z_0-9]*'),
+    ('NUMERO', r'\d+(\.\d+)?'),  
+    ('ESPACIO', r'\s+'),  
+]
 
-# Palabras clave para Python
-python_keywords = r'\b(False|await|else|import|pass|None|break|except|in|raise|True|class|finally|is|return|' \
-                  r'and|continue|for|lambda|try|as|def|from|nonlocal|while|assert|del|global|not|with|' \
-                  r'async|elif|if|or|yield|print)\b'
+PALABRAS_CLAVE = keyword.kwlist
 
-# Palabras clave para C
-c_keywords = r'\b(auto|break|case|char|const|continue|default|do|double|else|enum|extern|float|for|goto|' \
-             r'if|inline|int|long|register|return|short|signed|sizeof|static|struct|switch|typedef|' \
-             r'union|unsigned|void|volatile|while|print)\b'
+# Funciones del compilador
+def es_palabra_clave(palabra):
+    return palabra in PALABRAS_CLAVE
 
-# Directivas #include y archivos de encabezado de C
-c_directive_include = r'#include\s*<[^>]+>|#include\s*"[^"]+"'
-c_standard_headers = r'#include\s*<(stdio\.h|stdlib\.h|string\.h|math\.h|ctype\.h|time\.h|limits\.h|float\.h|stdbool\.h)>'
-c_user_headers = r'#include\s*"mi_archivo\.h"'
+def analizador_lexico(codigo_fuente):
+    tokens_encontrados = []
+    lineas = codigo_fuente.splitlines()
 
-# Operadores de Python
-python_operators = r'==|!=|<=|>=|<|>|\+|\-|\*|\/|%|=|//|>>|<<|\*\*|\+=|\-=|\*=|\/=|%=|&|\||\^|~'
-
-# Operadores de C
-c_operators = r'==|!=|<=|>=|<|>|\+|\-|\*|\/|%|=|>>|<<|\+=|\-=|\*=|\/=|%=|&|\||\^|~|&&|\|\|'
-
-# Delimitadores comunes
-delimiters = r'[{}()\[\];:,]'
-
-# Comentarios en Python
-python_comments = r'#.*'
-
-# Comentarios en C
-c_comments = r'//.*|/\*[\s\S]*?\*/'
-
-# Strings comunes
-strings = r'"[^"]*"|\'[^\']*\''
-
-# Identificadores comunes
-identifiers = r'[a-zA-Z_]\w*'
-
-# Números (flotantes e enteros)
-floats = r'\d+\.\d+'
-integers = r'\d+'
-
-# Espacios en blanco
-whitespace = r'\s+'
-
-# Clase Token
-class Token:
-    def __init__(self, value, token_type, line):
-        self.value = value
-        self.type = token_type
-        self.line = line
-
-    def __repr__(self):
-        return f" Línea: {self.line} - Token: [ {self.value} ]   -> {self.type}"
-
-# Clase Lexer (Analizador Léxico)
-class Lexer:
-    def __init__(self, code, language):
-        self.code = code
-        self.current_line = 1
-
-        # Define patrones según el lenguaje
-        if language == "Python":
-            self.token_patterns = [
-                (re.compile(python_keywords), 'KEYWORD'),
-                (re.compile(python_operators), 'OPERATOR'),
-                (re.compile(python_comments), 'COMMENT'),
-                (re.compile(strings), 'STRING'),
-                (re.compile(floats), 'FLOAT'),
-                (re.compile(integers), 'INTEGER'),
-                (re.compile(identifiers), 'IDENTIFIER'),
-                (re.compile(delimiters), 'DELIMITER'),
-                (re.compile(whitespace), None),  # Ignorar espacios en blanco
-            ]
-        elif language == "C":
-            self.token_patterns = [
-                (re.compile(c_keywords), 'KEYWORD'),
-                (re.compile(c_operators), 'OPERATOR'),
-                (re.compile(c_comments), 'COMMENT'),
-                (re.compile(c_standard_headers), 'STANDARD_HEADER'),
-                (re.compile(c_user_headers), 'USER_HEADER'),
-                (re.compile(c_directive_include), 'PREPROCESSOR_DIRECTIVE'),
-                (re.compile(strings), 'STRING'),
-                (re.compile(floats), 'FLOAT'),
-                (re.compile(integers), 'INTEGER'),
-                (re.compile(identifiers), 'IDENTIFIER'),
-                (re.compile(delimiters), 'DELIMITER'),
-                (re.compile(whitespace), None),  # Ignorar espacios en blanco
-            ]
-
-    def tokenize(self):
-        tokens = []
-        code = self.code
-
-        while code:
-            match = None
-            for pattern, token_type in self.token_patterns:
-                match = pattern.match(code)
-                if match:
-                    if token_type:  # Solo agregar el token si no es un espacio en blanco
-                        token = Token(
-                            match.group(0),
-                            token_type,
-                            self.current_line
-                        )
-                        tokens.append(token)
-                    # Avanzar el puntero en el código fuente
-                    code = code[match.end():]
-                    self._update_position(match.group(0))
+    for num_linea, linea in enumerate(lineas, start=1):
+        posicion = 0
+        while posicion < len(linea):
+            for token_tipo, patron in TOKENS_PYTHON:
+                patron_compilado = re.compile(patron)
+                coincidencia = patron_compilado.match(linea, posicion)
+                if coincidencia:
+                    texto = coincidencia.group(0)
+                    if token_tipo != 'ESPACIO':  
+                        if token_tipo == 'IDENTIFICADOR' and es_palabra_clave(texto):
+                            tokens_encontrados.append((num_linea, 'PALABRA_CLAVE', texto))
+                        else:
+                            tokens_encontrados.append((num_linea, token_tipo, texto))
+                    posicion = coincidencia.end(0)
                     break
-            if not match:
-                # Mejor manejo del error con el token no reconocido
-                unrecognized_token = re.match(r'\S+', code)  # Encuentra el primer token no reconocido
-                if unrecognized_token:
-                    error_token = unrecognized_token.group(0)
-                    raise ValueError(f"Error léxico en la línea {self.current_line}: Token no reconocido '{error_token}'")
-                else:
-                    raise ValueError(f"Error léxico en la línea {self.current_line}: Secuencia no reconocida cerca de '{code[:20]}'")
-        return tokens
+    return tokens_encontrados
 
-    def _update_position(self, text):
-        lines = text.splitlines()
-        if len(lines) > 1:
-            self.current_line += len(lines) - 1
-
-# Función auxiliar para crear el layout jerárquico
-def hierarchy_pos(G, root=None, width=1., vert_gap=0.2, vert_loc=0, xcenter=0.5):
-    pos = _hierarchy_pos(G, root, width, vert_gap, vert_loc, xcenter)
-    return pos
-
-def _hierarchy_pos(G, root, width=1., vert_gap=0.2, vert_loc=0, xcenter=0.5, pos=None, parent=None, parsed=[]):
-    if pos is None:
-        pos = {root: (xcenter, vert_loc)}
-    else:
-        pos[root] = (xcenter, vert_loc)
+# Implementación de árbol sintáctico descendente
+def construir_arbol_sintactico(tokens):
+    """
+    Construye un árbol sintáctico descendente de acuerdo a las reglas gramaticales.
+    """
+    arbol = {}
+    
+    def analizar_expresion(tokens):
+        if not tokens:
+            return None, tokens
         
-    children = list(G.neighbors(root))
-    if not isinstance(G, nx.DiGraph) and parent is not None:
-        children.remove(parent)
-    if len(children) != 0:
-        dx = width / len(children)
-        nextx = xcenter - width/2 - dx/2
-        for child in children:
-            nextx += dx
-            pos = _hierarchy_pos(G, child, width=dx, vert_gap=vert_gap, vert_loc=vert_loc-vert_gap, 
-                                 xcenter=nextx, pos=pos, parent=root, parsed=parsed)
-    return pos 
-
-# Función para graficar el árbol sintáctico jerárquico
-def graficar_arbol_sintactico(tokens):
-    G = nx.DiGraph()  # Árbol direccional
-
-    # Crear nodos y relaciones entre tokens
-    root_node = "Raíz"
-    G.add_node(root_node)
+        token = tokens[0]
+        tipo, valor = token[1], token[2]
+        
+        if tipo == "IDENTIFICADOR":
+            return {"tipo": "IDENTIFICADOR", "valor": valor}, tokens[1:]
+        elif tipo == "NUMERO":
+            return {"tipo": "NUMERO", "valor": valor}, tokens[1:]
+        elif tipo == "OPERADOR_ARITMETICO":
+            operador = valor
+            izquierda, tokens_restantes = analizar_expresion(tokens[1:])
+            derecha, tokens_restantes = analizar_expresion(tokens_restantes)
+            return {"tipo": "EXPRESION", "operador": operador, "izquierda": izquierda, "derecha": derecha}, tokens_restantes
+        
+        return None, tokens
     
-    for i, token in enumerate(tokens):
-        current_node = f"{token.value} ({token.type})"
-        G.add_node(current_node)
-        if i == 0:
-            G.add_edge(root_node, current_node)
-        else:
-            G.add_edge(f"{tokens[i-1].value} ({tokens[i-1].type})", current_node)
+    arbol, _ = analizar_expresion(tokens)
+    return arbol
 
-    # Usar el layout jerárquico
-    pos = hierarchy_pos(G, root=root_node)
+def construir_arbol_sintactico(tokens, nombre_programa):
+    g = Digraph('G', format='png')
+    g.attr(size='10,10', dpi='300')  # Tamaño y DPI
+    nodo_id = 0
+    pila_nodos = []
 
-    # Dibujar el grafo con ajustes visuales
-    plt.figure(figsize=(12, 8))
-    nx.draw(G, pos, with_labels=True, node_color=EVANGELION_PURPLE, 
-            font_color=EVANGELION_GREEN, edge_color=EVANGELION_ORANGE, 
-            node_size=1200, font_size=10, font_weight='bold')
-    
-    # Título del gráfico
-    plt.title("Árbol Sintáctico Jerárquico", fontsize=16, color=EVANGELION_GREEN)
-    
-    # Mostrar el gráfico
-    plt.show()
+    def nuevo_nodo(etiqueta):
+        nonlocal nodo_id
+        nodo_id += 1
+        return f"nodo{nodo_id}", etiqueta
 
-# Función para iniciar la aplicación
-def iniciar():
-    pantalla_inicio.destroy()
-    mostrar_analizador()
-
-# Función para analizar el código léxicamente
-def analizar_codigo():
-    codigo = texto_codigo.get("1.0", tk.END).strip()
-    if not codigo:
-        messagebox.showerror("Error", "Debe ingresar algún código para analizar.")
-        return
-    try:
-        lenguaje = lenguaje_var.get()
-        lexer = Lexer(codigo, lenguaje)
-        tokens = lexer.tokenize()
-        mostrar_resultado_lexico(tokens)
-    except ValueError as e:
-        messagebox.showerror("Error Léxico", str(e))
-
-# Función para mostrar el árbol sintáctico
-def mostrar_analizador_sintactico(tokens):
-    graficar_arbol_sintactico(tokens)
-
-def graficar_arbol_sintactico(tokens):
-    G = nx.DiGraph()
-    # Crear nodos y relaciones entre tokens (simplificación)
-    for i, token in enumerate(tokens):
-        G.add_node(f"{token.value} ({token.type})")
-        if i > 0:
-            G.add_edge(f"{tokens[i-1].value} ({tokens[i-1].type})", f"{token.value} ({token.type})")
-    pos = nx.spring_layout(G, k=1.5, iterations=50)  # Diseño del gráfico    
-    plt.figure(figsize=(12, 8))
-    nx.draw(G, pos, with_labels=True, node_color=EVANGELION_PURPLE, font_size=9, font_color=EVANGELION_GREEN, font_weight='bold', node_size=3000, edge_color=EVANGELION_ORANGE)
-    plt.title("Árbol Sintáctico Descendente", fontsize=16, color=EVANGELION_GREEN)
-    plt.show()
-
-# Función para mostrar los tokens del análisis léxico en otra ventana
-def mostrar_resultado_lexico(tokens):
-    ventana_resultado_lexico = tk.Toplevel()
-    ventana_resultado_lexico.title("Resultado del Análisis Léxico")
-    ventana_resultado_lexico.configure(bg=EVANGELION_BLACK)
-
-    # Definir el tamaño de la ventana
-    ancho = 450
-    alto = 800          
-
-    # Centrar la ventana
-    centrar_ventana(ventana_resultado_lexico, ancho, alto)
-
-    ventana_resultado_lexico.geometry(f"{ancho}x{alto}")
-
-    resultado_texto = scrolledtext.ScrolledText(ventana_resultado_lexico, wrap=tk.WORD, bg=EVANGELION_GRAY, fg=EVANGELION_GREEN)
-    resultado_texto.pack(expand=True, fill=tk.BOTH)
+    raiz_id, raiz_etiqueta = nuevo_nodo(f"Programa: {nombre_programa}")
+    g.node(raiz_id, raiz_etiqueta, shape='rect', style='filled', fillcolor='#A0D3E8')
+    nodo_actual = raiz_id
 
     for token in tokens:
-        resultado_texto.insert(tk.END, f"{token}\n")
+        tipo, texto = token[1], token[2]
+        if tipo in ["PALABRA_CLAVE", "OPERADOR_ASIGNACION", "OPERADOR_COMPARACION", "OPERADOR_ARITMETICO"]:
+            id_hijo, etiqueta_hijo = nuevo_nodo(texto)
+            g.node(id_hijo, etiqueta_hijo)
+            g.edge(nodo_actual, id_hijo)
+            pila_nodos.append(nodo_actual)
+            nodo_actual = id_hijo
+        elif tipo in ["NUMERO", "IDENTIFICADOR"]:
+            id_hijo, etiqueta_hijo = nuevo_nodo(texto)
+            g.node(id_hijo, etiqueta_hijo)
+            g.edge(nodo_actual, id_hijo)
+        elif tipo == "PUNTUACION" and texto == ';':
+            if pila_nodos:
+                nodo_actual = pila_nodos.pop()
 
-    # Botón para abrir el analizador sintáctico
-    boton_sintactico = tk.Button(ventana_resultado_lexico, text="Abrir Analizador Sintáctico", command=lambda: mostrar_analizador_sintactico(tokens), bg=EVANGELION_PURPLE, fg=EVANGELION_GREEN)
-    boton_sintactico.pack(pady=10)
+    g.render('arbol_sintactico', format='png', view=True)
+    messagebox.showinfo("Árbol Sintáctico", "Se generó el árbol sintáctico. Verifica 'arbol_sintactico.png'.")
 
-# Función para cargar el código de ejemplo en Python 1
-def cargar_ejemplo_python_1():
-    codigo_ejemplo_python_1 = '''def saludo():
-    print("Hola, mundo")
-saludo()
-'''
-    texto_codigo.delete(1.0, tk.END)
-    texto_codigo.insert(tk.END, codigo_ejemplo_python_1)
+# Funciones de análisis semántico
+def analizador_semantico(tokens):
+    errores = []
+    variables_definidas = set()
 
-# Función para cargar el código de ejemplo en Python 2
-def cargar_ejemplo_python_2():
-    codigo_ejemplo_python_2 = '''for i in range(25):
-    if i % 2 == 0:
-        print(f"{i} es par")
-'''
-    texto_codigo.delete(1.0, tk.END)
-    texto_codigo.insert(tk.END, codigo_ejemplo_python_2)
+    for _, tipo, valor in tokens:
+        if tipo == 'IDENTIFICADOR' and valor not in variables_definidas:
+            # Placeholder para detectar variables no definidas
+            if valor not in PALABRAS_CLAVE:  # Evitar palabras clave
+                errores.append(f"Variable '{valor}' no definida.")
+            else:
+                variables_definidas.add(valor)
+    
+    return errores
 
-# Función para cargar el código de ejemplo en C 1
-def cargar_ejemplo_c_1():
-    codigo_ejemplo_c_1 = '''int main() {
-    int x = 10;
-    float y = 20.5;
-    if (x > y) {
-        x = x + 1;
-    }
-    return 0;
-}
-'''
-    texto_codigo.delete(1.0, tk.END)
-    texto_codigo.insert(tk.END, codigo_ejemplo_c_1)
+# Funciones de generación de código intermedio, optimización y máquina
+def generar_codigo_intermedio(tokens):
+    codigo_intermedio = []
+    for _, tipo, valor in tokens:
+        if tipo == 'IDENTIFICADOR':
+            codigo_intermedio.append(f"LOAD {valor}")
+        elif tipo == 'NUMERO':
+            codigo_intermedio.append(f"PUSH {valor}")
+        elif tipo == 'OPERADOR_ARITMETICO':
+            codigo_intermedio.append(f"OPERATE {valor}")
+    
+    return codigo_intermedio
 
-# Función para cargar el código de ejemplo en C 2
-def cargar_ejemplo_c_2():
-    codigo_ejemplo_c_2 = '''#include <stdio.h>
+def optimizar_codigo(codigo_intermedio):
+    codigo_optimizado = []
+    for linea in codigo_intermedio:
+        # Optimización básica: eliminar operaciones redundantes
+        if "OPERATE" in linea:
+            if len(codigo_optimizado) > 0 and codigo_optimizado[-1].startswith("OPERATE"):
+                continue  # Saltar operaciones redundantes (como ejemplo)
+        codigo_optimizado.append(linea)
+    
+    return codigo_optimizado
 
-int main() {
-    for (int i = 0; i < 5; i++) {
-        if (i % 2 == 0) {
-            printf("%d es par\n", i);
-        }
-    }
-    return 0;
-}
-'''
-    texto_codigo.delete(1.0, tk.END)
-    texto_codigo.insert(tk.END, codigo_ejemplo_c_2)
+def generar_codigo_maquina(codigo_optimizado):
+    codigo_maquina = []
+    for linea in codigo_optimizado:
+        # Generación de código máquina básica
+        if "LOAD" in linea:
+            codigo_maquina.append(f"LOAD_REG {linea.split()[-1]}")
+        elif "PUSH" in linea:
+            codigo_maquina.append(f"PUSH_REG {linea.split()[-1]}")
+        elif "OPERATE" in linea:
+            codigo_maquina.append(f"EXECUTE_OP {linea.split()[-1]}")
+    
+    return codigo_maquina
 
-# Función para mostrar el analizador léxico
-def mostrar_analizador():
-    ventana_principal = tk.Tk()
-    ventana_principal.title("Analizador Léxico")
-    ventana_principal.configure(bg=EVANGELION_BLACK)
+def ejecutar_codigo(codigo_fuente):
+    try:
+        # Capturar salida estándar y errores
+        import io
+        import sys
 
-    # Definir el tamaño de la ventana
-    ancho = 800
-    alto = 800
+        # Redirigir salida estándar y errores
+        buffer_salida = io.StringIO()
+        sys.stdout = buffer_salida
+        sys.stderr = buffer_salida
 
-    # Centrar la ventana
-    centrar_ventana(ventana_principal, ancho, alto)
+        # Ejecutar el código
+        exec(codigo_fuente)
 
-    ventana_principal.geometry(f"{ancho}x{alto}")
+        # Restaurar salida estándar y errores
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
 
-    # Etiqueta del lenguaje
-    etiqueta_lenguaje = tk.Label(ventana_principal, text="Seleccione el lenguaje:", font=("Courier New", 12), bg=EVANGELION_BLACK, fg=EVANGELION_GREEN)
-    etiqueta_lenguaje.pack(pady=10)
+        # Obtener salida del buffer
+        salida = buffer_salida.getvalue()
 
-    # Opción de lenguaje
-    global lenguaje_var
-    lenguaje_var = tk.StringVar(value="Python")
-    opcion_python = tk.Radiobutton(ventana_principal, text="Python", variable=lenguaje_var, value="Python", font=("Courier New", 12), bg=EVANGELION_BLACK, fg=EVANGELION_ORANGE)
-    opcion_c = tk.Radiobutton(ventana_principal, text="C", variable=lenguaje_var, value="C", font=("Courier New", 12), bg=EVANGELION_BLACK, fg=EVANGELION_ORANGE)
-    opcion_python.pack()
-    opcion_c.pack()
+        # Mostrar la salida en un cuadro de mensaje
+        messagebox.showinfo("Resultado del Código", salida if salida else "Código ejecutado sin salida.")
+    except Exception as e:
+        # Restaurar salida estándar y errores en caso de excepción
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+        messagebox.showerror("Error en el Código", f"Error: {str(e)}")
 
-    # Área de texto para el código fuente
-    global texto_codigo
-    texto_codigo = scrolledtext.ScrolledText(ventana_principal, wrap=tk.WORD, bg=EVANGELION_GRAY, fg=EVANGELION_GREEN)
-    texto_codigo.pack(expand=True, fill=tk.BOTH)
+# Funciones de la interfaz gráfica
+def mostrar_resultados_lexicos(codigo_fuente):
+    tokens = analizador_lexico(codigo_fuente)
+    resultado = "\n".join(f"Línea {t[0]}: {t[1]} -> {t[2]}" for t in tokens)
+    messagebox.showinfo("Análisis Léxico", resultado)
 
-    # Botón para analizar el código
-    boton_analizar = tk.Button(ventana_principal, text="Analizar Código", command=analizar_codigo, font=("Courier New", 12), bg=EVANGELION_PURPLE, fg=EVANGELION_GREEN)
-    boton_analizar.pack(pady=10)
+def mostrar_arbol_sintactico(codigo_fuente):
+    tokens = analizador_lexico(codigo_fuente)
+    construir_arbol_sintactico(tokens, "MiPrograma")
 
-    # Menú de ejemplos
-    menu_ejemplos = tk.Menu(ventana_principal)
-    ventana_principal.config(menu=menu_ejemplos)
+def mostrar_errores_semanticos(codigo_fuente):
+    tokens = analizador_lexico(codigo_fuente)
+    errores = analizador_semantico(tokens)
+    if errores:
+        messagebox.showerror("Errores Semánticos", "\n".join(errores))
+    else:
+        messagebox.showinfo("Análisis Semántico", "No se encontraron errores semánticos.")
 
-    submenu_python = tk.Menu(menu_ejemplos, tearoff=0)
-    submenu_python.add_command(label="Ejemplo Python 1", command=cargar_ejemplo_python_1)
-    submenu_python.add_command(label="Ejemplo Python 2", command=cargar_ejemplo_python_2)
-    menu_ejemplos.add_cascade(label="Ejemplos Python", menu=submenu_python)
+def mostrar_codigo_intermedio(codigo_fuente):
+    tokens = analizador_lexico(codigo_fuente)
+    codigo_intermedio = generar_codigo_intermedio(tokens)
+    messagebox.showinfo("Código Intermedio", "\n".join(codigo_intermedio))
 
-    submenu_c = tk.Menu(menu_ejemplos, tearoff=0)
-    submenu_c.add_command(label="Ejemplo C 1", command=cargar_ejemplo_c_1)
-    submenu_c.add_command(label="Ejemplo C 2", command=cargar_ejemplo_c_2)
-    menu_ejemplos.add_cascade(label="Ejemplos C", menu=submenu_c)
+def mostrar_codigo_optimizado(codigo_fuente):
+    tokens = analizador_lexico(codigo_fuente)
+    codigo_intermedio = generar_codigo_intermedio(tokens)
+    codigo_optimizado = optimizar_codigo(codigo_intermedio)
+    messagebox.showinfo("Código Optimizado", "\n".join(codigo_optimizado))
 
-    ventana_principal.mainloop()
+def mostrar_codigo_maquina(codigo_fuente):
+    tokens = analizador_lexico(codigo_fuente)
+    codigo_intermedio = generar_codigo_intermedio(tokens)
+    codigo_optimizado = optimizar_codigo(codigo_intermedio)
+    codigo_maquina = generar_codigo_maquina(codigo_optimizado)
+    messagebox.showinfo("Código Máquina", "\n".join(codigo_maquina))
 
-# Función para centrar la ventana
-def centrar_ventana(ventana, ancho, alto):
-    pantalla_ancho = ventana.winfo_screenwidth()
-    pantalla_alto = ventana.winfo_screenheight()
-    posicion_x = int((pantalla_ancho / 2) - (ancho / 2))
-    posicion_y = int((pantalla_alto / 2) - (alto / 2))
-    ventana.geometry(f"{ancho}x{alto}+{posicion_x}+{posicion_y}")
+# Interfaz de inicio
+def menu_compilador():
+    ventana = tk.Tk()
+    ventana.title("Compilador Python")
+    ventana.geometry("700x600")
+    ventana.config(bg="#2e3b4e")
+    
+    label_titulo = tk.Label(ventana, text="Compilador Python", font=("Arial", 24, "bold"), fg="#ffffff", bg="#2e3b4e")
+    label_titulo.pack(pady=20)
+    
+    texto_codigo = scrolledtext.ScrolledText(ventana, width=80, height=20, font=("Courier New", 12))
+    texto_codigo.pack(padx=20, pady=10)
+    
+    button_compilar = tk.Button(ventana, text="Compilar", width=20, height=2, font=("Arial", 14), bg="#4CAF50", fg="#ffffff", command=lambda: ventana_compilador(texto_codigo.get("1.0", tk.END)))
+    button_compilar.pack(pady=10)
 
-# Pantalla de inicio
-pantalla_inicio = tk.Tk()
-pantalla_inicio.title("Analizador Léxico")
-pantalla_inicio.configure(bg= EVANGELION_BLACK)
-pantalla_inicio.resizable(False, False)
+    button_salir = tk.Button(ventana, text="Salir", width=20, height=2, font=("Arial", 14), bg="#f44336", fg="#ffffff", command=ventana.quit)
+    button_salir.pack(pady=5)
 
-# Configurar tamaño y centrar la pantalla de inicio
-centrar_ventana(pantalla_inicio, 400, 350)
+    ventana.mainloop()
 
-# Fuentes
-titulo_fuente = ("Courier New", 20, "bold")
-bienvenida_fuente = ("Courier New", 12)
-boton_fuente = ("Courier New", 14)
+def ventana_compilador(codigo_fuente):
+    ventana_opciones = tk.Toplevel()
+    ventana_opciones.title("Opciones de Compilación")
+    ventana_opciones.geometry("700x600")
+    ventana_opciones.config(bg="#2e3b4e")
+    
+    label_opciones = tk.Label(ventana_opciones, text="Seleccione una opción:", font=("Arial", 16), fg="#ffffff", bg="#2e3b4e")
+    label_opciones.pack(pady=20)
 
-# Widgets en la pantalla de inicio
-etiqueta_titulo = tk.Label(pantalla_inicio, text="COMPILADOR", font=titulo_fuente, bg=EVANGELION_BLACK, fg=EVANGELION_GREEN)
-etiqueta_titulo.pack(pady=30)
+    button_lexico = tk.Button(ventana_opciones, text="Análisis Léxico", width=30, height=2, font=("Arial", 12), command=lambda: mostrar_resultados_lexicos(codigo_fuente))
+    button_lexico.pack(pady=10)
 
-etiqueta_bienvenida = tk.Label(pantalla_inicio, text="Bienvenido al COMPILADOR\nElige tu lenguaje y código a analizar", font=bienvenida_fuente, bg=EVANGELION_BLACK, fg=EVANGELION_WHITE)
-etiqueta_bienvenida.pack(pady=10)
+    button_arbol = tk.Button(ventana_opciones, text="Árbol Sintáctico", width=30, height=2, font=("Arial", 12), command=lambda: mostrar_arbol_sintactico(codigo_fuente))
+    button_arbol.pack(pady=10)
 
-boton_iniciar = tk.Button(pantalla_inicio, text="Iniciar", command=iniciar, font=boton_fuente, bg=EVANGELION_PURPLE, fg=EVANGELION_GREEN)
-boton_iniciar.pack(pady=20)
-etiqueta_bienvenida = tk.Label(pantalla_inicio, text="by:\nIvan Martinez\nLaszlo Sierra", font=bienvenida_fuente, bg=EVANGELION_BLACK, fg=EVANGELION_ORANGE)
-etiqueta_bienvenida.pack(pady=10)
+    button_semantico = tk.Button(ventana_opciones, text="Análisis Semántico", width=30, height=2, font=("Arial", 12), command=lambda: mostrar_errores_semanticos(codigo_fuente))
+    button_semantico.pack(pady=10)
 
-pantalla_inicio.mainloop()
+    button_intermedio = tk.Button(ventana_opciones, text="Código Intermedio", width=30, height=2, font=("Arial", 12), command=lambda: mostrar_codigo_intermedio(codigo_fuente))
+    button_intermedio.pack(pady=10)
+
+    button_optimizado = tk.Button(ventana_opciones, text="Código Optimizado", width=30, height=2, font=("Arial", 12), command=lambda: mostrar_codigo_optimizado(codigo_fuente))
+    button_optimizado.pack(pady=10)
+
+    button_maquina = tk.Button(ventana_opciones, text="Código Máquina", width=30, height=2, font=("Arial", 12), command=lambda: mostrar_codigo_maquina(codigo_fuente))
+    button_maquina.pack(pady=10)
+
+    button_maquina.pack(pady=10)
+
+    button_ejecutar = tk.Button(ventana_opciones,text="Ejecutar Código",width=30,height=2,font=("Arial", 12),command=lambda: ejecutar_codigo(codigo_fuente))
+    button_ejecutar.pack(pady=10)
+
+    ventana_opciones.mainloop()
+
+if __name__ == "__main__":
+    menu_compilador()
